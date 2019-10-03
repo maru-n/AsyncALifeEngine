@@ -1,11 +1,14 @@
 import alifeengine
 import time
 
-def func(x):
-    print(f'Received variable {x}')
+def func(var, variable_name):
+    print(f'Received {variable_name}:{var}')
 
-alifeengine.add_listener('sender', func)
+def func2(var):
+    print(f'Received_X {var}')
+
+alifeengine.add_listener(func)
+alifeengine.add_listener(func2, 'r_X')
 
 while True:
-    print("hello")
-    time.sleep(1)
+    time.sleep(10)

@@ -15,9 +15,12 @@ DEFAULT_NODE_NAME = 'node_'
 # Docker container name is {DOCKER_CONTAINER_NAME_PREFIX}{NODE_NAME}
 DOCKER_CONTAINER_NAME_PREFIX = 'aenode.'
 DOCKER_CONTAINER_SCRIPT_DIR = '/app/scripts'
+DOCKER_CONTAINER_LIBRARY_DIR = '/app/alifeengine'
 DOCKER_IMAGE_NAME = 'marun/alifeengine_node:latest'
 DOCKER_NETWORK_NAME = 'alifeengine_network'
 DOCKER_CONTAINER_LOG_PATH = '/var/log/aenode.log'
+DOCKER_CONTAINER_MESSAGE_PORT = 8889
+
 
 import unittest
 
@@ -80,6 +83,7 @@ def command_create(argv):
 
     script_file = path.basename(args.script)
     script_dir = path.dirname(path.abspath(args.script))
+    library_dir = path.dirname(__file__)
 
     container = client.containers.run(image=DOCKER_IMAGE_NAME,
                                       name=container_name,
@@ -87,10 +91,13 @@ def command_create(argv):
                                       detach=True,
                                       auto_remove=True,
                                       privileged=True,
-                                      volumes = {script_dir: {'bind': DOCKER_CONTAINER_SCRIPT_DIR, 'mode': 'ro'}})
+                                      ports={f'{DOCKER_CONTAINER_MESSAGE_PORT}/udp': None},
+                                      volumes = {script_dir: {'bind': DOCKER_CONTAINER_SCRIPT_DIR, 'mode': 'ro'},
+                                                 library_dir: {'bind': '/usr/local/lib/python3.7/site-packages/alifeengine', 'mode': 'ro'}})
+
+    container.exec_run(f'pip install -e {DOCKER_CONTAINER_LIBRARY_DIR}')
     container.exec_run(f'ln -s {path.join(DOCKER_CONTAINER_SCRIPT_DIR, script_file)} /app/main.py')
 
-    print(f'ALife Engine: {node_name} is lauched.')
 
 
 def command_remove(argv):
@@ -190,31 +197,148 @@ def command_log(argv):
             result = new_result
             time.sleep(0.1)
 
+import requests
+AE_SERVER_HOST = '127.0.0.1'
+AE_SERVER_COMMAND_PORT = 8888
+AE_SERVER_MESSAGE_PORT = 8889
 
 def command_connect(argv):
     parser = argparse.ArgumentParser(description='connect node.')
     parser.prog += f' {sys.argv[1]}'
-    parser.add_argument('node1', help="node name.")
-    parser.add_argument('node2', help="node name.")
+    parser.add_argument('source_node')
+    parser.add_argument('source_var_name')
+    parser.add_argument('target_node_name')
+    parser.add_argument('target_var_name')
     args = parser.parse_args(argv)
 
-    # create network if not exist
-    network_list = [n.name for n in client.networks.list()]
-    if not DOCKER_NETWORK_NAME in network_list:
-        client.networks.create(DOCKER_NETWORK_NAME)
+    container = client.containers.get(DOCKER_CONTAINER_NAME_PREFIX + args.target_node_name)
+    port = int(container.ports[f'{DOCKER_CONTAINER_MESSAGE_PORT}/udp'][0]['HostPort'])
 
-    # connect nodes to the network
-    net = client.networks.get(DOCKER_NETWORK_NAME)
-    net.connect(DOCKER_CONTAINER_NAME_PREFIX + args.node1)
-    net.connect(DOCKER_CONTAINER_NAME_PREFIX + args.node2)
+    url = f'http://{AE_SERVER_HOST}:{AE_SERVER_COMMAND_PORT}/connect/'
+    params = {
+        'source_node': args.source_node,
+        'source_var_name': args.source_var_name,
+        'target_node_name': args.target_node_name,
+        'target_var_name': args.target_var_name,
+        'local_port': port
+    }
+    res = requests.post(url, params=params)
+    if res.text == 'OK':
+        print(f'ALifeEngine: connectted {args.source_node}:{args.source_var_name} => {args.target_node_name}:{args.target_var_name}')
+    else:
+        print(f'ALifeEngine: connection error.')
+        print(res)
+
+
+    # # create network if not exist
+    # network_list = [n.name for n in client.networks.list()]
+    # if not DOCKER_NETWORK_NAME in network_list:
+    #     client.networks.create(DOCKER_NETWORK_NAME)
+    #
+    # # connect nodes to the network
+    # net = client.networks.get(DOCKER_NETWORK_NAME)
+    # net.connect(DOCKER_CONTAINER_NAME_PREFIX + args.node1)
+    # net.connect(DOCKER_CONTAINER_NAME_PREFIX + args.node2)
 
 
 def command_test(argv):
     unittest.main()
 
 
+from bottle import get, post, request, run
+import pickle
+
+connection_map = dict()
+
+@post('/connect/')
+def index():
+    #print(source_node, source_var_name, target_node_name, target_var_name)
+    #import ipdb; ipdb.set_trace()
+    #data = pickle.loads(request.body.read())
+    #print(data)
+    src_n = request.query['source_node']
+    src_v = request.query['source_var_name']
+    s = (src_n, src_v)
+    tgt_n = request.query['target_node_name']
+    tgt_v = request.query['target_var_name']
+    local_port = int(request.query['local_port'])
+    t = (tgt_n, tgt_v, local_port)
+    if not s in connection_map:
+        connection_map[s] = set()
+    connection_map[s].add(t)
+
+    print(connection_map)
+    return 'OK'
+
+
+import socketserver
+
+class MessageHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        req_data = pickle.loads(self.request[0])
+        try:
+            src_node = req_data['node_name']
+            src_vname = req_data['variable_name']
+            data = req_data['data']
+        except KeyError as e:
+            print(f'invalid message: {req_data}')
+            return
+
+
+        if (src_node, src_vname) in connection_map:
+            for tgt_node, tgt_vname, p in connection_map[(src_node, src_vname)]:
+                payload = {'variable_name':tgt_vname, 'data':data}
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.sendto(pickle.dumps(payload), ('localhost', p))
+                print(f'MSG:{data}({type(data)}) : {src_node}:{src_vname} => {tgt_node}:{tgt_vname}')
+
+
+        # host_name = socket.gethostbyaddr(self.client_address[0])[0]
+        # node_name = host_name.replace(DOCKER_CONTAINER_NAME_PREFIX, '').replace('.' + DOCKER_NETWORK_NAME, '')
+        # if node_name in listener_list:
+        #     for l in listener_list[node_name]:
+        #         l(data)
+
+
+
+def start_server():
+    server = socketserver.ThreadingUDPServer((AE_SERVER_HOST, AE_SERVER_MESSAGE_PORT), MessageHandler)
+    server_thread = threading.Thread(target=server.serve_forever)
+    server_thread.daemon = True
+    server_thread.start()
+    run(host=AE_SERVER_HOST, port=AE_SERVER_COMMAND_PORT)
+
+
+import socket
+
+def stop_server():
+    print('!!!not implemented!!!')
+
+from .core import *
+
+def test(args):
+    data = {
+        'node_name': 'sender',
+        'variable_name': 'X',
+        'data': 3
+    }
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.sendto(pickle.dumps(data), (AE_SERVER_HOST, AE_SERVER_MESSAGE_PORT))
+
+
+def command_server(argv):
+    parser = argparse.ArgumentParser(description='controll server.')
+    parser.prog += f' {sys.argv[1]}'
+    parser.add_argument('command', choices=['start', 'stop'], help="command")
+    args = parser.parse_args(argv)
+    if args.command == 'start':
+        start_server()
+    elif args.command == 'stop':
+        stop_server()
+
 
 COMMAND_MAP = {
+    'server': command_server,
     'ls': command_list_node,
     'create': command_create,
     'remove': command_remove,
@@ -225,7 +349,8 @@ COMMAND_MAP = {
     'restart': command_restart,
     'log': command_log,
     'connect': command_connect,
-    'test': command_test
+    'test': command_test,
+    'aaa': test
 }
 
 
