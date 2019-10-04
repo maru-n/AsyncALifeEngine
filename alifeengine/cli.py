@@ -205,26 +205,29 @@ AE_SERVER_MESSAGE_PORT = 8889
 def command_connect(argv):
     parser = argparse.ArgumentParser(description='connect node.')
     parser.prog += f' {sys.argv[1]}'
-    parser.add_argument('source_node')
-    parser.add_argument('source_var_name')
-    parser.add_argument('target_node_name')
-    parser.add_argument('target_var_name')
+    parser.add_argument('source', help='source_node:source_var_name')
+    parser.add_argument('target', help='target_node_name:target_var_name')
     args = parser.parse_args(argv)
 
-    container = client.containers.get(DOCKER_CONTAINER_NAME_PREFIX + args.target_node_name)
+    src_node = args.source.split(':')[0]
+    src_vname = args.source.split(':')[1]
+    tgt_node = args.target.split(':')[0]
+    tgt_vname = args.target.split(':')[1]
+
+    container = client.containers.get(DOCKER_CONTAINER_NAME_PREFIX + tgt_node)
     port = int(container.ports[f'{DOCKER_CONTAINER_MESSAGE_PORT}/udp'][0]['HostPort'])
 
     url = f'http://{AE_SERVER_HOST}:{AE_SERVER_COMMAND_PORT}/connect/'
     params = {
-        'source_node': args.source_node,
-        'source_var_name': args.source_var_name,
-        'target_node_name': args.target_node_name,
-        'target_var_name': args.target_var_name,
+        'source_node': src_node,
+        'source_var_name': src_vname,
+        'target_node_name': tgt_node,
+        'target_var_name': tgt_vname,
         'local_port': port
     }
     res = requests.post(url, params=params)
     if res.text == 'OK':
-        print(f'ALifeEngine: connectted {args.source_node}:{args.source_var_name} => {args.target_node_name}:{args.target_var_name}')
+        print(f'ALifeEngine: connectted {src_node}:{src_vname} => {tgt_node}:{tgt_vname}')
     else:
         print(f'ALifeEngine: connection error.')
         print(res)
