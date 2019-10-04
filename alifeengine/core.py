@@ -4,14 +4,59 @@ import sys
 import pickle
 import threading
 import socketserver
+from bottle import get, post, request, run
+import pickle
+from .constants import *
 
 
-DOCKER_NETWORK_CONNECTION_PORT = 12345
-DOCKER_CONTAINER_NAME_PREFIX = 'aenode.'
-DOCKER_NETWORK_NAME = 'alifeengine_network'
-AE_SERVER_HOSTNAME = 'host.docker.internal'
-AE_SERVER_MESSAGE_PORT = 8889
-DOCKER_CONTAINER_MESSAGE_PORT = 8889
+class MessageHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        req_data = pickle.loads(self.request[0])
+        try:
+            src_node = req_data['node_name']
+            src_vname = req_data['variable_name']
+            data = req_data['data']
+        except KeyError as e:
+            print(f'invalid message: {req_data}')
+            return
+
+        if (src_node, src_vname) in connection_map:
+            for tgt_node, tgt_vname, p in connection_map[(src_node, src_vname)]:
+                payload = {'variable_name':tgt_vname, 'data':data}
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.sendto(pickle.dumps(payload), ('localhost', p))
+                print(f'MSG:{data}({type(data)}) : {src_node}:{src_vname} => {tgt_node}:{tgt_vname}')
+
+
+connection_map = dict()
+
+@post('/connect/')
+def index():
+    src_n = request.query['source_node']
+    src_v = request.query['source_var_name']
+    s = (src_n, src_v)
+    tgt_n = request.query['target_node_name']
+    tgt_v = request.query['target_var_name']
+    local_port = int(request.query['local_port'])
+    t = (tgt_n, tgt_v, local_port)
+    if not s in connection_map:
+        connection_map[s] = set()
+    connection_map[s].add(t)
+
+    print(connection_map)
+    return 'OK'
+
+def start_server():
+    server = socketserver.ThreadingUDPServer((AE_SERVER_HOST, AE_SERVER_MESSAGE_PORT), MessageHandler)
+    server_thread = threading.Thread(target=server.serve_forever)
+    server_thread.daemon = True
+    server_thread.start()
+    run(host=AE_SERVER_HOST, port=AE_SERVER_COMMAND_PORT)
+
+
+def stop_server():
+    print('!!!not implemented!!!')
+
 
 def send(variable_name, var):
     host_name = os.uname()[1]
@@ -67,5 +112,17 @@ class ThreadedUDPRequestHandler(socketserver.BaseRequestHandler):
             l(data, variable_name)
 
 
-#server.shutdown()
-#server.server_close()
+def test():
+    unittest.main()
+
+import unittest
+
+class Test(unittest.TestCase):
+    def setUp(self):
+        pass
+
+    def test_find_all_containers(self):
+        pass
+
+    def tearDown(self):
+        pass
