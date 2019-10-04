@@ -2,7 +2,8 @@
 
 import argparse
 import sys
-from .core import start_server, stop_server, test, run_node, stop_node, restart_node, log_node, create_node, remove_node, connect_node, print_node_list
+from .core import test, run_node, stop_node, restart_node, log_node, create_node, remove_node, connect_node, print_node_list
+from .server import AsyncALifeEngineServer
 from .constants import *
 
 
@@ -86,10 +87,11 @@ def command_server(argv):
     parser.add_argument('command', choices=['start', 'stop'], help="command")
     args = parser.parse_args(argv)
     if args.command == 'start':
-        start_server()
+        server = AsyncALifeEngineServer()
+        server.run()
     elif args.command == 'stop':
-        stop_server()
-
+        server = AsyncALifeEngineServer()
+        server.stop()
 
 COMMAND_MAP = {
     'server': command_server,
