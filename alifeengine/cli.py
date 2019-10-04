@@ -5,7 +5,7 @@ import argparse
 from os import path
 import sys
 import time
-from .core import start_server, stop_server, test
+from .core import start_server, stop_server, test, run_node, stop_node, restart_node, log_node
 from .constants import *
 
 import requests
@@ -99,27 +99,12 @@ def command_remove(argv):
             print(f'ALife Engine: {n} not found.')
 
 
-def exec_command(node_name, command):
-    container = client.containers.get(DOCKER_CONTAINER_NAME_PREFIX + node_name)
-    result = container.exec_run(command)
-    return result.output.decode()
-
-
 def command_run(argv):
     parser = argparse.ArgumentParser(description='run node process.')
     parser.prog += f' {sys.argv[1]}'
     parser.add_argument('node_name', nargs='+', help="node name or 'all'.")
     args = parser.parse_args(argv)
-
-    if args.node_name[0] == 'all':
-        node_list = find_all_nodes()
-    else:
-        node_list = args.node_name
-
-    for n in node_list:
-        exec_command(n, f'cp /dev/null {DOCKER_CONTAINER_LOG_PATH}')
-        result = exec_command(n, 'supervisorctl start aenode')
-        print(result)
+    run_node(args.node_name)
 
 
 def command_stop(argv):
@@ -127,34 +112,15 @@ def command_stop(argv):
     parser.prog += f' {sys.argv[1]}'
     parser.add_argument('node_name', nargs='+', help="node name or 'all'.")
     args = parser.parse_args(argv)
+    stop_node(args.node_name)
 
-    if args.node_name[0] == 'all':
-        node_list = find_all_nodes()
-    else:
-        node_list = args.node_name
-
-    for n in node_list:
-        result = exec_command(n, 'supervisorctl stop aenode')
-        print(result)
 
 def command_restart(argv):
     parser = argparse.ArgumentParser(description='run node process.')
     parser.prog += f' {sys.argv[1]}'
     parser.add_argument('node_name', nargs='+', help="node name or 'all'.")
     args = parser.parse_args(argv)
-
-    if args.node_name[0] == 'all':
-        node_list = find_all_nodes()
-    else:
-        node_list = args.node_name
-
-    for n in node_list:
-        result = exec_command(n, 'supervisorctl stop aenode')
-        print(result)
-    for n in node_list:
-        exec_command(n, f'cp /dev/null {DOCKER_CONTAINER_LOG_PATH}')
-        result = exec_command(n, 'supervisorctl start aenode')
-        print(result)
+    restart_node(args.node_name)
 
 
 def command_log(argv):
@@ -163,18 +129,7 @@ def command_log(argv):
     parser.add_argument('node_name', help="node name.")
     parser.add_argument("-f", "--follow", help="Follow log output", action="store_true")
     args = parser.parse_args(argv)
-    result = exec_command(args.node_name , f'cat {DOCKER_CONTAINER_LOG_PATH}')
-    print(result, end='', flush=True)
-    if args.follow:
-        while True:
-            new_result = exec_command(args.node_name , f'cat {DOCKER_CONTAINER_LOG_PATH}')
-            if len(new_result) < len(result):
-                print('---- restarted ----')
-                print(new_result, end='', flush=True)
-            else:
-                print(new_result[len(result):], end='', flush=True)
-            result = new_result
-            time.sleep(0.1)
+    log_node(args.node_name, follow=args.follow)
 
 
 def command_connect(argv):

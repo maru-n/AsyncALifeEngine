@@ -57,6 +57,62 @@ def start_server():
 def stop_server():
     print('!!!not implemented!!!')
 
+def exec_command(node_name, command):
+    container = client.containers.get(DOCKER_CONTAINER_NAME_PREFIX + node_name)
+    result = container.exec_run(command)
+    return result.output.decode()
+
+def run_node(node_name):
+    if node_name[0] == 'all':
+        node_list = find_all_nodes()
+    else:
+        node_list = node_name
+
+    for n in node_list:
+        exec_command(n, f'cp /dev/null {DOCKER_CONTAINER_LOG_PATH}')
+        result = exec_command(n, 'supervisorctl start aenode')
+        print(result)
+
+
+def stop_node(node_name):
+    if node_name[0] == 'all':
+        node_list = find_all_nodes()
+    else:
+        node_list = node_name
+
+    for n in node_list:
+        result = exec_command(n, 'supervisorctl stop aenode')
+        print(result)
+
+
+def restart_node(node_name):
+    if node_name[0] == 'all':
+        node_list = find_all_nodes()
+    else:
+        node_list = node_name
+
+    for n in node_list:
+        result = exec_command(n, 'supervisorctl stop aenode')
+        print(result)
+    for n in node_list:
+        exec_command(n, f'cp /dev/null {DOCKER_CONTAINER_LOG_PATH}')
+        result = exec_command(n, 'supervisorctl start aenode')
+        print(result)
+
+
+def log_node(node_name, follow=False):
+    result = exec_command(node_name , f'cat {DOCKER_CONTAINER_LOG_PATH}')
+    print(result, end='', flush=True)
+    if follow:
+        while True:
+            new_result = exec_command(node_name , f'cat {DOCKER_CONTAINER_LOG_PATH}')
+            if len(new_result) < len(result):
+                print('---- restarted ----')
+                print(new_result, end='', flush=True)
+            else:
+                print(new_result[len(result):], end='', flush=True)
+            result = new_result
+            time.sleep(0.1)
 
 def send(variable_name, var):
     host_name = os.uname()[1]
@@ -81,7 +137,6 @@ def add_listener(func, variable_name=None):
     node_name = host_name.replace(DOCKER_CONTAINER_NAME_PREFIX, '').replace('.' + DOCKER_NETWORK_NAME, '')
     global server
     if server is None:
-        #server = socketserver.ThreadingUDPServer(('0.0.0.0', DOCKER_NETWORK_CONNECTION_PORT), ThreadedUDPRequestHandler)
         server = socketserver.ThreadingUDPServer(('0.0.0.0', DOCKER_CONTAINER_MESSAGE_PORT), ThreadedUDPRequestHandler)
         server_thread = threading.Thread(target=server.serve_forever)
         server_thread.daemon = True
