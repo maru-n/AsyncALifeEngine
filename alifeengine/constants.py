@@ -7,7 +7,7 @@ AE_SERVER_HOST = '127.0.0.1'
 AE_SERVER_COMMAND_PORT = 8888
 AE_SERVER_MESSAGE_PORT = 8889
 
-LIBRARY_REQUIPMENTS = ['bottle']
+LIBRARY_REQUIPMENTS = ['bottle', 'docker']
 
 ## settings related with Docker ##
 # Docker container name is {DOCKER_CONTAINER_NAME_PREFIX}{NODE_NAME}
